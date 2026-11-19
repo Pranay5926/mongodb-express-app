@@ -5,28 +5,50 @@ const app = express();
 const port = process.env.PORT || 7000;
 
 // MongoDB connection
-const mongoUrl = process.env.MONGO_URI || "mongodb://admin:admin123@localhost:27017";
+const mongoUrl = (process.env.MONGO_URI || "").trim() || "mongodb://admin:admin123@localhost:27017";
 const databaseName = process.env.DB_NAME || "library_db";
 
-const client = new MongoClient(mongoUrl);
+let db = null;
 
-let db;
-await client
-  .connect()
-  .then(() => {
-    db = client.db(databaseName);
-    console.log("Connected to MongoDB");
-  })
-  .catch((err) => {
-    console.error("Failed to connect to MongoDB", err);
-    process.exit(1);
-  });
+try {
+  const displayUri = mongoUrl.includes("@")
+    ? mongoUrl.replace(/:([^:@]+)@/, ":****@")
+    : mongoUrl;
+  console.log(`Connecting to MongoDB at: ${displayUri}`);
+  const client = new MongoClient(mongoUrl);
+  await client.connect();
+  db = client.db(databaseName);
+  console.log("Connected to MongoDB successfully!");
+} catch (err) {
+  console.error("Failed to connect to MongoDB:", err.message || err);
+}
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-//CRUD API endpoints
+// Root health check route
+app.get("/", (req, res) => {
+  res.status(200).json({
+    service: "mongodb-express-app",
+    status: "online",
+    database: db ? "connected" : "disconnected",
+  });
+});
+
+// Database guard middleware for API routes
+const checkDb = (req, res, next) => {
+  if (!db) {
+    return res.status(503).json({
+      message: "Database not connected. Please verify MONGO_URI in Render environment variables.",
+    });
+  }
+  next();
+};
+
+app.use("/api/v1/books", checkDb);
+
+// CRUD API endpoints
 // Create a new book - POST /api/v1/books
 app.post("/api/v1/books", (req, res) => {
   const { title, author, category, price } = req.body;
